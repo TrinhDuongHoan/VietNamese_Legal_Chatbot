@@ -1,0 +1,94 @@
+version: "3.9"
+
+services:
+  mariadb:
+    image: mariadb:11
+    container_name: mariadb
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: legal_chatbot
+      MYSQL_USER: legal_user
+      MYSQL_PASSWORD: legal_pass
+    ports:
+      - "3308:3306"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  valkey:
+    image: valkey/valkey:bookworm
+    container_name: valkey
+    ports:
+      - "6379:6379"
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  backend:
+    build: ./backend
+    container_name: chatbot-api
+    env_file:
+      - .env
+    environment:
+      MYSQL_USER: legal_user
+      MYSQL_PASSWORD: legal_pass
+      MYSQL_HOST: mariadb
+      MYSQL_PORT: 3306
+      MYSQL_DB: legal_chatbot
+      CELERY_BROKER_URL: redis://valkey:6379/0
+      CELERY_RESULT_BACKEND: redis://valkey:6379/0
+      QDRANT_URL: http://qdrant:6333
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      MODEL_API_BASE: ${MODEL_API_BASE:-Qwen/Qwen3.5-27B}
+      TEMPERATURE: ${TEMPERATURE:-0}
+      BASE_URL: ${BASE_URL:-}
+      EMBEDDING_MODEL_NAME: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+    depends_on:
+      - mariadb
+      - valkey
+      - qdrant
+    ports:
+      - "8000:8000"
+
+  worker:
+    build: ./backend
+    container_name: chatbot-worker
+    command: celery -A src.tasks.celery_app worker --loglevel=info
+    env_file:
+      - .env
+    environment:
+      MYSQL_USER: legal_user
+      MYSQL_PASSWORD: legal_pass
+      MYSQL_HOST: mariadb
+      MYSQL_PORT: 3306
+      MYSQL_DB: legal_chatbot
+      CELERY_BROKER_URL: redis://valkey:6379/0
+      CELERY_RESULT_BACKEND: redis://valkey:6379/0
+      QDRANT_URL: http://qdrant:6333
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      MODEL_API_BASE: ${MODEL_API_BASE:-Qwen/Qwen3.5-27B}
+      TEMPERATURE: ${TEMPERATURE:-0}
+      BASE_URL: ${BASE_URL:-}
+      EMBEDDING_MODEL_NAME: sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+    depends_on:
+      - mariadb
+      - valkey
+      - qdrant
+
+  frontend:
+    build: ./frontend
+    container_name: streamlit-app
+    depends_on:
+      - backend
+    ports:
+      - "8501:8501"
+
+volumes:
+  mariadb_data:
+  qdrant_data:

@@ -1,0 +1,1 @@
+print("Split data stub")
